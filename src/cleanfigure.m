@@ -49,9 +49,9 @@ function cleanfigure(varargin)
   meta.gca = [];
 
   % Set up command line options.
-  m2t.cmdOpts = matlab2tikzInputParser;
+  m2t.cmdOpts = m2tInputParser;
   m2t.cmdOpts = m2t.cmdOpts.addParamValue(m2t.cmdOpts, 'minimumPointsDistance', 1.0e-10, @isnumeric);
-  m2t.cmdOpts = m2t.cmdOpts.addParamValue(m2t.cmdOpts, 'handle', gcf, @isnumeric);
+  m2t.cmdOpts = m2t.cmdOpts.addParamValue(m2t.cmdOpts, 'handle', gcf, @ishandle);
 
   % Finally parse all the elements.
   m2t.cmdOpts = m2t.cmdOpts.parse(m2t.cmdOpts, varargin{:});
@@ -114,16 +114,45 @@ function indent = recursiveCleanup(meta, h, minimumPointsDistance, indent)
           movePointsCloser(meta, h);
           % Don't be too precise.
           coarsenLine(meta, h, minimumPointsDistance);
+      elseif strcmpi(type, 'stair')
+          pruneOutsideBox(meta, h);
       elseif strcmp(type, 'text')
-          % Check if text is inside bounds by checking if the Extent rectangle
-          % and the axes box overlap.
-          xlim = get(meta.gca, 'XLim');
-          ylim = get(meta.gca, 'YLim');
+          % Ensure units of type 'data' (default) and restore the setting later
+          units_original = get(h, 'Units');
+          set(h, 'Units', 'data');
+
+          % Check if text is inside bounds by checking if the position is inside
+          % the x, y and z limits. This works for both 2D and 3D plots.
+          x_lim = get(meta.gca, 'XLim');
+          y_lim = get(meta.gca, 'YLim');
+          z_lim = get(meta.gca, 'ZLim');
+          axLim = [x_lim; y_lim; z_lim];
+
+          pos = get(h, 'Position');
+          bPosInsideLim = ( pos' >= axLim(:,1) ) & ( pos' <= axLim(:,2) );
+
+          % In 2D plots the 'extent' of the textbox is available and also
+          % considered to keep the textbox, if it is partially inside the axis
+          % limits.
           extent = get(h, 'Extent');
-          extent(3:4) = extent(1:2) + extent(3:4);
-          overlap = xlim(1) < extent(3) && xlim(2) > extent(1) ...
-                 && ylim(1) < extent(4) && ylim(2) > extent(2);
-          if ~overlap
+
+          % Restore original units (after reading all dimensions)
+          set(h, 'Units', units_original);
+
+          % This check makes sure the extent is only considered if it contains
+          % valid values. The 3D case returns a vector of NaNs.
+          if all(~isnan(extent))
+            % Extend the actual axis limits by the extent of the textbox so that
+            % the textbox is not discarded, if it overlaps the axis.
+            x_lim(1) = x_lim(1) - extent(3);    % x-limit is extended by width
+            y_lim(1) = y_lim(1) - extent(4);    % y-limit is extended by height
+            axLim = [x_lim; y_lim; z_lim];
+
+            bPosInsideLimExt = ( pos' >= axLim(:,1) ) & ( pos' <= axLim(:,2) );
+            bPosInsideLim = bPosInsideLim | bPosInsideLimExt;
+          end
+
+          if ~all(bPosInsideLim)
               % Artificially disable visibility. m2t will check and skip.
               set(h, 'Visible', 'off');
           end
@@ -139,7 +168,13 @@ function pruneOutsideBox(meta, handle)
 
   xData = get(handle, 'XData');
   yData = get(handle, 'YData');
-  zData = get(handle, 'ZData');
+
+  % Obtain zData, if available
+  if isprop(handle, 'ZData')
+    zData = get(handle, 'ZData');
+  else
+    zData = [];
+  end
 
   if isempty(zData)
     data = [xData(:), yData(:)];
@@ -348,6 +383,7 @@ function movePointsCloser(meta, handle)
     return;
   end
 
+  numberOfPoints = length(xData);
   data = [xData(:), yData(:)];
 
   xlim = get(meta.gca, 'XLim');
@@ -417,23 +453,47 @@ function movePointsCloser(meta, handle)
      else
          rep = r{k};
      end
-     if isempty(d) && ~isempty(rep) && lastEntryIsReplacement
-         % The last entry was a replacment, and the first one now is.
-         % Prepend a NaN.
-         rep = [NaN(1, size(r{k}, 2)); ...
-                rep];
+
+     % Don't draw line, if connecting line would be completely outside axis.
+     % We can check this using a line clipping algorithm.
+     % Illustration of the problem:
+     % http://www.cc.gatech.edu/grads/h/Hao-wei.Hsieh/Haowei.Hsieh/sec1_example.html
+     % This boils down to a line intersects line test, where all four lines of
+     % the axis rectangle need to be considered.
+     %
+     % First consider two easy cases:
+     % 1. This can't be the case, if last point was not replaced, because it is
+     %    inside the axis limits ('lastEntryIsReplacement == 0').
+     % 2. This can't be the case, if the current point will not be replace,
+     %    because it is inside the axis limits.
+     %    ( (isempty(d) && ~isempty(rep) == 0 ).
+     if lastEntryIsReplacement && (isempty(d) && ~isempty(rep))
+         % Now check if the connecting line goes through the axis rectangle.
+         % OR: Only do this, if the original segment was not visible either
+         bLineOutsideAxis = ~segmentVisible(...
+             data([lastReplIndex,replaceIndices(k)],:), ...
+             [false;false], xlim, ylim);
+
+         % If line is completly outside the axis, don't draw the line. This is
+         % achieved by adding a NaN and necessary, because the two points are
+         % moved close to the axis limits and thus would afterwards show a
+         % connecting line in the axis.
+         if bLineOutsideAxis
+             rep = [NaN(1, size(r{k}, 2)); rep];
+         end
      end
-     % Add the data.
-     if ~isempty(d)
-         dataNew = [dataNew; ...
-                    d];
+
+     % Add the data, depending if it is a valid point or a replacement
+     if ~isempty(d)     % Add current point from valid point 'd'
+         dataNew = [dataNew; d];
          lastEntryIsReplacement = false;
      end
-     if ~isempty(rep)
-         dataNew = [dataNew; ...
-                    rep];
+     if ~isempty(rep)   % Add current point from replacement point 'rep'
+         dataNew = [dataNew; rep];
          lastEntryIsReplacement = true;
      end
+
+     % Store last replacement index
      lastReplIndex = replaceIndices(k);
   end
   dataNew = [dataNew; ...
