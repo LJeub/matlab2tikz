@@ -2755,19 +2755,21 @@ function [style] = getXYAlignmentOfText(handle, style)
     vertical   = '';
     switch VerticalAlignment
         case {'top', 'cap'}
-            vertical = 'below';
-        case {'baseline', 'bottom'}
-            vertical = 'above';
+            vertical = 'north';
+        case 'baseline'
+            vertical = 'base';
+        case 'bottom'
+            vertical = 'south';
     end
     switch HorizontalAlignment
         case 'left'
-            horizontal = 'right';
+            horizontal = 'west';
         case 'right'
-            horizontal = 'left';
+            horizontal = 'east';
     end
     alignment = strtrim(sprintf('%s %s', vertical, horizontal));
     if ~isempty(alignment)
-         style = opts_add(style, alignment);
+         style = opts_add(style, 'anchor', alignment);
     end
 
     % Set 'align' option that is needed for multiline text
