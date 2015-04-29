@@ -1709,6 +1709,10 @@ function [tikzMarkerSize, isDefault] = ...
             error('matlab2tikz:translateMarkerSize',                   ...
                 'Unknown matlabMarker ''%s''.', matlabMarker);
     end
+    
+    if tikzMarkerSize < 0.1 && tikzMarkerSize > m2t.tol
+        tikzMarkerSize = 0.1;
+    end 
 end
 % ==============================================================================
 function [tikzMarker, markOptions] = ...
