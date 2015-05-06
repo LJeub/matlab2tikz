@@ -2763,8 +2763,12 @@ function [style] = getXYAlignmentOfText(handle, style)
     horizontal = '';
     vertical   = '';
     switch VerticalAlignment
-        case {'top', 'cap'}
+        case 'top'
             vertical = 'north';
+        case 'cap'
+            vertical = 'mid';
+        case 'middle'
+            vertical = '';
         case 'baseline'
             vertical = 'base';
         case 'bottom'
