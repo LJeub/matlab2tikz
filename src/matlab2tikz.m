@@ -1606,9 +1606,12 @@ function [m2t, drawOptions] = getMarkerOptions(m2t, h)
         % take over the marker size in any case when in strict mode;
         % if not, don't add anything in case of default marker size
         % and effectively take Pgfplots' default.
-        if m2t.cmdOpts.Results.strict || ~isDefault
+        if m2t.cmdOpts.Results.strict 
             drawOptions = opts_add(drawOptions, 'mark size', ...
                                    sprintf('%.1fpt', tikzMarkerSize));
+        else
+            drawOptions = opts_add(drawOptions, 'mark size', ...
+                                    sprintf('%.1fpt',markerSize/2));
         end
 
         markOptions = opts_new();
