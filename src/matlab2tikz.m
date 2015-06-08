@@ -1849,9 +1849,12 @@ function [m2t, str] = drawPatch(m2t, handle)
     if size(Faces,1) == 1 && s.hasOneEdgeColor && isFaceColorFlat
         ptType = '';
         cycle  = conditionallyCyclePath(Vertices);
-
-        [m2t, drawOptions] = setColor(m2t, handle, drawOptions, 'draw', ...
-                                         s.edgeColor);
+        if ~isNone(lineStyle)
+            [m2t, drawOptions] = setColor(m2t, handle, drawOptions, 'draw', ...
+                                         s.edgeColor,'none');
+        else
+            drawOptions = opts_add(drawOptions, 'draw','none');
+        end
         [m2t, drawOptions] = setColor(m2t, handle, drawOptions, 'fill', ...
                                          s.faceColor);
 
