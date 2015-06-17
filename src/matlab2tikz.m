@@ -119,7 +119,7 @@ function matlab2tikz(varargin)
 %      matlab2tikz('myfile.tex');
 %
 
-%   Copyright (c) 2008--2014, Nico Schlömer <nico.schloemer@gmail.com>
+%   Copyright (c) 2008--2015, Nico Schlömer <nico.schloemer@gmail.com>
 %   All rights reserved.
 %
 %   Redistribution and use in source and binary forms, with or without
@@ -159,10 +159,10 @@ m2t.currentHandles = [];
 m2t.transform = []; % For hgtransform groups
 m2t.pgfplotsVersion = [1,3];
 m2t.name = 'matlab2tikz';
-m2t.version = '0.6.0';
+m2t.version = '1.0.0';
 m2t.author = 'Nico Schlömer';
 m2t.authorEmail = 'nico.schloemer@gmail.com';
-m2t.years = '2008--2014';
+m2t.years = '2008--2015';
 m2t.website = 'http://www.mathworks.com/matlabcentral/fileexchange/22022-matlab2tikz-matlab2tikz';
 VCID = VersionControlIdentifier();
 m2t.versionFull = strtrim(sprintf('v%s %s', m2t.version, VCID));
@@ -184,11 +184,13 @@ m2t.content = struct('name',     '', ...
                      'options',  {opts_new()}, ...
                      'content',  {cell(0)}, ...
                      'children', {cell(0)});
-m2t.preamble = sprintf(['\\usepackage{pgfplots}\n', ...
+m2t.preamble = sprintf(['\\usepackage[T1]{fontenc}\n', ...
+                        '\\usepackage[utf8]{inputenc}\n', ...
+                        '\\usepackage{pgfplots}\n', ...
                         '\\usepackage{grffile}\n', ...
                         '\\pgfplotsset{compat=newest}\n', ...
                         '\\usetikzlibrary{plotmarks}\n', ...
-                        '\\usepgfplotslibrary{patchplots}\n',...
+                        '\\usepgfplotslibrary{patchplots}\n', ...
                         '\\usepackage{amsmath}\n']);
 
 %% scan the options
@@ -645,13 +647,10 @@ function [m2t, pgfEnvironments] = handleAllChildren(m2t, h)
 
             case 'image'
                 [m2t, str] = drawImage(m2t, child);
-
-            case 'contour'
-                [m2t, str] = drawContour(m2t, child);
-
+            
             case {'hggroup', 'matlab.graphics.primitive.Group', ...
                   'scatter', 'bar', 'stair', 'stem' ,'errorbar', 'area', ...
-                  'quiver'}
+                  'quiver','contour'}
                 [m2t, str] = drawHggroup(m2t, child);
 
             case 'hgtransform'
@@ -719,11 +718,17 @@ switch getEnvironment
         [legendString, interpreter, hasLegend] = findLegendInfoMATLAB(m2t, child);
 
     case 'Octave'
-        % Octave associates legends with axes, not with (line) plot.
-        % The variable m2t.gcaHasLegend is set in drawAxes().
-        hasLegend = ~isempty(m2t.gcaAssociatedLegend);
-        interpreter = get(m2t.gcaAssociatedLegend, 'interpreter');
-        legendString = getOrDefault(child,'displayname','');
+        % Octave does not store a reference to the legend entry in the
+        % plotted objects. It references the plotted objects in reverse,
+        % in the legend's 'deletefcn' property.
+        % The variable m2t.gcaAssociatedLegend is set in drawAxes().
+        if ~isempty(m2t.gcaAssociatedLegend)
+            delfun           = get(m2t.gcaAssociatedLegend,'deletefcn');
+            legendEntryPeers = delfun{6}; % See set(hlegend, "deletefcn", {@deletelegend2, ca, [], [], t1, hplots}); in legend.m  
+            hasLegend        = ismember(child, legendEntryPeers);
+            interpreter      = get(m2t.gcaAssociatedLegend, 'interpreter');
+            legendString     = getOrDefault(child,'displayname','');
+        end
 
     otherwise
         errorUnknownEnvironment();
@@ -824,6 +829,8 @@ function m2t = drawAxes(m2t, handle)
     m2t.gcaAssociatedLegend = getAssociatedLegend(m2t, handle);
 
     m2t = retrievePositionOfAxes(m2t, handle);
+
+    m2t = addAspectRatioOptionsOfAxes(m2t, handle);
 
     % Axis direction
     for axis = 'xyz'
@@ -949,7 +956,7 @@ function legendhandle = getAssociatedLegend(m2t, handle)
             % Make sure that m2t.legendHandles is a row vector.
             for lhandle = m2t.legendHandles(:)'
                 ud = get(lhandle, 'UserData');
-                if isVisible(lhandle) && any(handle == ud.handle)
+                if isVisibleContainer(lhandle) && any(handle == ud.handle)
                     legendhandle = lhandle;
                     break;
                 end
@@ -982,13 +989,6 @@ function m2t = retrievePositionOfAxes(m2t, handle)
             opts_add(m2t.axesContainers{end}.options, ...
             'scale only axis', []);
     end
-
-    % set the aspect ratio
-    if ~isempty(pos.aspectRatio)
-        m2t.axesContainers{end}.options = opts_add(...
-            m2t.axesContainers{end}.options, 'plot box ratio', ...
-            formatDim(pos.aspectRatio));
-    end
 end
 % ==============================================================================
 function m2t = setDimensionOfAxes(m2t, widthOrHeight, dimension)
@@ -996,6 +996,23 @@ function m2t = setDimensionOfAxes(m2t, widthOrHeight, dimension)
     m2t.axesContainers{end}.options = opts_add(...
             m2t.axesContainers{end}.options, widthOrHeight, ...
             formatDim(dimension.value, dimension.unit));
+end
+% ==============================================================================
+function m2t = addAspectRatioOptionsOfAxes(m2t, handle)
+% Set manual aspect ratio for current axes
+% TODO: deal with 'axis image', 'axis square', etc. (#540)
+    if strcmpi(get(handle, 'DataAspectRatioMode'), 'manual') ||...
+       strcmpi(get(handle, 'PlotBoxAspectRatioMode'), 'manual')
+        % we need to set the plot box aspect ratio
+        if m2t.axesContainers{end}.is3D
+            % Note: set 'plot box ratio' for 3D axes to avoid bug with
+            % 'scale mode = uniformly' (see #560)
+            aspectRatio = getPlotBoxAspectRatio(handle);
+            m2t.axesContainers{end}.options = opts_add(...
+            m2t.axesContainers{end}.options, 'plot box ratio', ...
+            formatAspectRatio(m2t, aspectRatio));
+        end
+    end
 end
 % ==============================================================================
 function m2t = drawBackgroundOfAxes(m2t, handle)
@@ -1354,7 +1371,7 @@ function options = setAxisLimits(m2t, handle, axis, options)
     end
 end
 % ==============================================================================
-function bool = isAxisVisible(axisHandle)
+function bool = isVisibleContainer(axisHandle)
     if ~isVisible(axisHandle)
         % An invisible axes container *can* have visible children, so don't
         % immediately bail out here.
@@ -1369,12 +1386,6 @@ function bool = isAxisVisible(axisHandle)
     else
         bool = true;
     end
-end
-% ==============================================================================
-function bool = isAxis3D(axisHandle)
-% Check if elevation is not orthogonal to xy plane
-    axisView = get(axisHandle,'view');
-    bool     = ~ismember(axisView(2),[90,-90]);
 end
 % ==============================================================================
 function [m2t, str] = drawLine(m2t, h, yDeviation)
@@ -1857,15 +1868,9 @@ function [m2t, str] = drawPatch(m2t, handle)
         end
         [m2t, drawOptions] = setColor(m2t, handle, drawOptions, 'fill', ...
                                          s.faceColor);
-
-        if opts_has(patchOptions, 'draw opacity')
-            drawOptions         = opts_add(drawOptions,'draw opacity', ...
-                                            sprintf(m2t.ff, s.edgeAlpha));
-        end
-        if opts_has(patchOptions, 'fill opacity')
-            drawOptions         = opts_add(drawOptions,'fill opacity', ...
-                                            sprintf(m2t.ff, s.faceAlpha));
-        end
+                                     
+        [drawOptions] = opts_copy(patchOptions, 'draw opacity', drawOptions);
+        [drawOptions] = opts_copy(patchOptions, 'fill opacity', drawOptions);
 
     else % Multiple patches
 
@@ -2255,8 +2260,40 @@ function alpha = normalizedAlphaValues(m2t, alpha, handle)
 end
 % ==============================================================================
 function [m2t, str] = drawContour(m2t, h)
-  str = '';
+    if isHG2()
+        [m2t, str] = drawContourHG2(m2t, h);
+    else
+        % Save legend state for the contour group
+        hasLegend = m2t.currentHandleHasLegend;
 
+        % Plot children patches
+        children  = get(h,'children');
+        N         = numel(children);
+        str       = cell(N,1);
+        for ii = 1:N
+            % Plot in reverse order
+            child          = children(N-ii+1);
+            isContourLabel = strcmpi(get(child,'type'),'text');
+            if isContourLabel
+                [m2t, str{ii}] = drawText(m2t,child);
+            else
+                [m2t, str{ii}] = drawPatch(m2t,child);
+            end
+
+            % Only first child can be in the legend
+            m2t.currentHandleHasLegend = false; 
+        end
+        str = strcat(str,sprintf('\n'));
+        str = [str{:}];
+
+        % Restore group's legend state
+        m2t.currentHandleHasLegend = hasLegend;
+    end
+end
+% ==============================================================================
+function [m2t, str] = drawContourHG2(m2t, h)
+  str = '';
+  
   % Retrieve ContourMatrix
   contours = get(h,'ContourMatrix')';
   [istart, nrows] = findStartOfContourData(contours);
@@ -2391,14 +2428,23 @@ function [m2t, str] = drawFilledContours(m2t, str, h, contours, istart, nrows)
     % Plot
     columnNames = {'x','y'};
     for ii = 1:ncont + 1
+        drawOpts = opts_new();
+
         % Get color
         zval          = cellcont{ii}(1,1);
         [m2t, xcolor] = getColor(m2t,h,zval,'image');
+        drawOpts      = opts_add(drawOpts,'fill',xcolor);
+
+        % Toggle legend entry
+        hasLegend = ii == 1 && m2t.currentHandleHasLegend;
+        drawOpts  = maybeShowInLegend(hasLegend, drawOpts);
+
         % Print table
         [m2t, table, tabOpts] = makeTable(m2t, columnNames, cellcont{ii}(2:end,:));
+
         % Fillplot
-        str = sprintf('%s\\addplot[fill=%s] table[%s] {%%\n%s};\n', ...
-            str, xcolor{1}, opts_print(m2t, tabOpts, ','), table);
+        str = sprintf('%s\\addplot[%s] table[%s] {%%\n%s};\n', ...
+            str, opts_print(m2t,drawOpts,','), opts_print(m2t,tabOpts,','), table);
     end
 end
 % ==============================================================================
@@ -2441,8 +2487,11 @@ function [m2t, str] = drawHggroup(m2t, h)
         case {'specgraph.scattergroup','matlab.graphics.chart.primitive.Scatter'}
             % scatter plots
             [m2t,str] = drawScatterPlot(m2t, h);
-
-        case {'specgraph.contourgroup', 'hggroup', 'matlab.graphics.primitive.Group'}
+        
+        case {'specgraph.contourgroup', 'matlab.graphics.chart.primitive.Contour'}
+            [m2t,str] = drawContour(m2t, h);
+            
+        case {'hggroup', 'matlab.graphics.primitive.Group'}
             % handle all those the usual way
             [m2t, str] = handleAllChildren(m2t, h);
 
@@ -2574,7 +2623,7 @@ function [m2t,str] = drawSurface(m2t, h)
     [dx, dy, dz, numrows] = getXYZDataFromSurface(h);
     m2t = jumpAtUnboundCoords(m2t, [dx(:); dy(:); dz(:)]);
 
-    opts = addZBufferOptions(m2t, h, opts);
+    [m2t, opts] = addZBufferOptions(m2t, h, opts);
 
     % Check if 3D
     is3D = m2t.axesContainers{end}.is3D;
@@ -2654,7 +2703,7 @@ function [m2t,str] = drawSurface(m2t, h)
     [m2t, str] = addLabel(m2t, str);
 end
 % ==============================================================================
-function opts = addZBufferOptions(m2t, h, opts)
+function [m2t, opts] = addZBufferOptions(m2t, h, opts)
     % Enforce 'z buffer=sort' if shader is flat and is a 3D plot. It is to
     % avoid overlapping e.g. sphere plots and to properly mimic Matlab's
     % coloring of faces.
@@ -2664,11 +2713,15 @@ function opts = addZBufferOptions(m2t, h, opts)
     %   dy are rank-1-matrices.
     % - hist3D plots should not be z-sorted or the highest bars will cover
     %   the shortest one even if positioned in the back
-    isShaderFlat = isempty(strfind(opts_get(opts, 'shader'),'interp'));
-    isHist3D     = strcmpi(get(h,'tag'),'hist3');
+    isShaderFlat = isempty(strfind(opts_get(opts, 'shader'), 'interp'));
+    isHist3D     = strcmpi(get(h,'tag'), 'hist3');
     is3D         = m2t.axesContainers{end}.is3D;
     if is3D && isShaderFlat && ~isHist3D
-        opts = opts_add(opts, 'z buffer','sort');
+        opts = opts_add(opts, 'z buffer', 'sort');
+        % Pgfplots 1.12 contains a bug fix that fixes legend entries when
+        % 'z buffer=sort' has been set. So, it's  easier to always require that
+        % version anyway. See #504 for more information.
+        m2t = needsPgfplotsVersion(m2t, [1,12]);
     end
 end
 % ==============================================================================
@@ -2990,6 +3043,7 @@ function [m2t, opts, s] = shaderOptsMesh(m2t, handle, opts, s)
 end
 % ==============================================================================
 function [m2t, opts, s] = shaderOptsSurfPatch(m2t, handle, opts, s)
+% gets the shader options for surface patches
 
     % Set opacity if FaceAlpha < 1 in MATLAB
     s.faceAlpha = get(handle, 'FaceAlpha');
@@ -3003,60 +3057,74 @@ function [m2t, opts, s] = shaderOptsSurfPatch(m2t, handle, opts, s)
         opts = opts_add(opts,'draw opacity',sprintf(m2t.ff,s.edgeAlpha));
     end
 
-    % Edge 'none'
-    if isNone(s.edgeColor)
-        s.hasOneEdgeColor = true; % consider void as true
-        if strcmpi(s.faceColor, 'flat')
-            opts = opts_add(opts,'shader','flat');
-        elseif strcmpi(s.faceColor, 'interp');
-            opts = opts_add(opts,'shader','interp');
-        else
-            s.hasOneFaceColor = true;
-            [m2t,xFaceColor]  = getColor(m2t, handle, s.faceColor, 'patch');
-            opts              = opts_add(opts,'fill',xFaceColor);
-        end
+    if isNone(s.edgeColor) % Edge 'none'
+        [m2t, opts, s] = shaderOptsSurfPatchEdgeNone(m2t, handle, opts, s);
+        
+    elseif strcmpi(s.edgeColor, 'interp') % Edge 'interp'
+        [m2t, opts, s] = shaderOptsSurfPatchEdgeInterp(m2t, handle, opts, s);
 
-    % Edge 'interp'
-    elseif strcmpi(s.edgeColor, 'interp')
-        if strcmpi(s.faceColor, 'interp')
-            opts = opts_add(opts,'shader','interp');
-        elseif strcmpi(s.faceColor, 'flat')
-            opts = opts_add(opts,'shader','faceted');
-        else
-            s.hasOneFaceColor = true;
-            [m2t,xFaceColor]  = getColor(m2t, handle, s.faceColor, 'patch');
-            opts              = opts_add(opts,'fill',xFaceColor);
-         end
+    elseif strcmpi(s.edgeColor, 'flat') % Edge 'flat'
+        [m2t, opts, s] = shaderOptsSurfPatchEdgeFlat(m2t, handle, opts, s);
 
-    % Edge 'flat'
-    elseif strcmpi(s.edgeColor, 'flat')
-        if strcmpi(s.faceColor, 'flat')
-            opts = opts_add(opts,'shader','flat corner');
-        elseif strcmpi(s.faceColor, 'interp')
-            opts = opts_add(opts,'shader','faceted interp');
-        else
-            s.hasOneFaceColor = true;
-            opts              = opts_add(opts,'shader','flat corner');
-            [m2t,xFaceColor]  = getColor(m2t, handle, s.faceColor, 'patch');
-            opts              = opts_add(opts,'fill',xFaceColor);
-        end
-
-    % Edge RGB
+    else % Edge RGB
+        [m2t, opts, s] = shaderOptsSurfPatchEdgeRGB(m2t, handle, opts, s);
+    end
+end
+% ==============================================================================
+function [m2t, opts, s] = shaderOptsSurfPatchEdgeNone(m2t, handle, opts, s)
+% gets the shader options for surface patches without edges
+    s.hasOneEdgeColor = true; % consider void as true
+    if strcmpi(s.faceColor, 'flat')
+        opts = opts_add(opts,'shader','flat');
+    elseif strcmpi(s.faceColor, 'interp');
+        opts = opts_add(opts,'shader','interp');
     else
-        s.hasOneEdgeColor = true;
-        [m2t, xEdgeColor] = getColor(m2t, handle, s.edgeColor, 'patch');
-        if isnumeric(s.faceColor)
-            s.hasOneFaceColor = true;
-            [m2t, xFaceColor] = getColor(m2t, handle, s.faceColor, 'patch');
-            opts              = opts_add(opts,'fill',xFaceColor);
-            opts              = opts_add(opts,'faceted color',xEdgeColor);
-        elseif strcmpi(s.faceColor,'interp')
-            opts = opts_add(opts,'shader','faceted interp');
-            opts = opts_add(opts,'faceted color',xEdgeColor);
-        else
-            opts = opts_add(opts,'shader','flat corner');
-            opts = opts_add(opts,'draw',xEdgeColor);
-        end
+        s.hasOneFaceColor = true;
+        [m2t,xFaceColor]  = getColor(m2t, handle, s.faceColor, 'patch');
+        opts              = opts_add(opts,'fill',xFaceColor);
+    end
+end
+function [m2t, opts, s] = shaderOptsSurfPatchEdgeInterp(m2t, handle, opts, s)
+% gets the shader options for surface patches with interpolated edge colors  
+    if strcmpi(s.faceColor, 'interp')
+        opts = opts_add(opts,'shader','interp');
+    elseif strcmpi(s.faceColor, 'flat')
+        opts = opts_add(opts,'shader','faceted');
+    else
+        s.hasOneFaceColor = true;
+        [m2t,xFaceColor]  = getColor(m2t, handle, s.faceColor, 'patch');
+        opts              = opts_add(opts,'fill',xFaceColor);
+    end
+end
+function [m2t, opts, s] = shaderOptsSurfPatchEdgeFlat(m2t, handle, opts, s)
+% gets the shader options for surface patches with flat edge colors, i.e. the
+% vertex color
+    if strcmpi(s.faceColor, 'flat')
+        opts = opts_add(opts,'shader','flat corner');
+    elseif strcmpi(s.faceColor, 'interp')
+        opts = opts_add(opts,'shader','faceted interp');
+    else
+        s.hasOneFaceColor = true;
+        opts              = opts_add(opts,'shader','flat corner');
+        [m2t,xFaceColor]  = getColor(m2t, handle, s.faceColor, 'patch');
+        opts              = opts_add(opts,'fill',xFaceColor);
+    end
+end
+function [m2t, opts, s] = shaderOptsSurfPatchEdgeRGB(m2t, handle, opts, s)
+% gets the shader options for surface patches with fixed (RGB) edge color
+    s.hasOneEdgeColor = true;
+    [m2t, xEdgeColor] = getColor(m2t, handle, s.edgeColor, 'patch');
+    if isnumeric(s.faceColor)
+        s.hasOneFaceColor = true;
+        [m2t, xFaceColor] = getColor(m2t, handle, s.faceColor, 'patch');
+        opts              = opts_add(opts,'fill',xFaceColor);
+        opts              = opts_add(opts,'faceted color',xEdgeColor);
+    elseif strcmpi(s.faceColor,'interp')
+        opts = opts_add(opts,'shader','faceted interp');
+        opts = opts_add(opts,'faceted color',xEdgeColor);
+    else
+        opts = opts_add(opts,'shader','flat corner');
+        opts = opts_add(opts,'draw',xEdgeColor);
     end
 end
 % ==============================================================================
@@ -3085,83 +3153,14 @@ function [m2t, str] = drawScatterPlot(m2t, h)
 
     drawOptions = opts_new();
     if length(cData) == 3
-        % No special treatment for the colors or markers are needed.
-        % All markers have the same color.
-        [m2t, xcolor, hasFaceColor] = getColorOfMarkers(m2t, h, 'MarkerFaceColor', cData);
-        [m2t, ecolor, hasEdgeColor] = getColorOfMarkers(m2t, h, 'MarkerEdgeColor', cData);
-
-        if constMarkerkSize
-            drawOptions = opts_add(drawOptions, 'only marks');
-            drawOptions = opts_add(drawOptions, 'mark', tikzMarker);
-            drawOptions = opts_add(drawOptions, 'mark options', ...
-                                  ['{' opts_print(m2t, markOptions, ',') '}']);
-            drawOptions = opts_add(drawOptions, 'mark size', ...
-                                   sprintf('%.4fpt', sData));
-            if hasFaceColor && hasEdgeColor
-                drawOptions = opts_add(drawOptions, 'draw', ecolor);
-                drawOptions = opts_add(drawOptions, 'fill', xcolor);
-            else
-                drawOptions = opts_add(drawOptions, 'color', xcolor);
-            end
-        else % if changing marker size but same color on all marks
-            markerOptions = opts_new();
-            markerOptions = opts_add(markerOptions, 'mark', tikzMarker);
-            markerOptions = opts_add(markerOptions, 'mark options', ...
-                ['{' opts_print(m2t, markOptions, ',') '}']);
-            if hasEdgeColor
-                markerOptions = opts_add(markerOptions, 'draw', ecolor);
-            else
-                markerOptions = opts_add(markerOptions, 'draw', xcolor);
-            end
-            if hasFaceColor
-                markerOptions = opts_add(markerOptions, 'fill', xcolor);
-            end
-            % for changing marker size, the 'scatter' option has to be added
-
-            drawOptions = opts_add(drawOptions, 'scatter');
-            drawOptions = opts_add(drawOptions, 'only marks');
-            drawOptions = opts_add(drawOptions, 'color', xcolor);
-            drawOptions = opts_add(drawOptions, 'mark', tikzMarker);
-            drawOptions = opts_add(drawOptions, 'mark options', ...
-                ['{' opts_print(m2t, markOptions, ',') '}']);
-
-            if ~hasFaceColor
-                drawOptions = opts_add(drawOptions, ...
-                    'scatter/use mapped color', xcolor);
-            else
-                drawOptions = opts_add(drawOptions, ...
-                    'scatter/use mapped color', ...
-                    ['{' opts_print(m2t, markerOptions,',') '}']);
-            end
-        end
+        [m2t, drawOptions] = getScatterOptsOneColor(m2t, h, drawOptions, ...
+                                                markOptions, tikzMarker, ...
+                                                cData, sData, constMarkerkSize);
     elseif size(cData,2) == 3
-        drawOptions = opts_add(drawOptions, 'only marks');
-        userWarning(m2t, 'Pgfplots cannot handle RGB scatter plots yet.');
-        % TODO Get this in order as soon as Pgfplots can do "scatter rgb".
+        drawOptions = getScatterOptsRGB(m2t, drawOptions);
     else
-        markerOptions = opts_new();
-        markerOptions = opts_add(markerOptions, 'mark', tikzMarker);
-        markerOptions = opts_add(markerOptions, 'mark options', ...
-                        ['{' opts_print(m2t, markOptions, ',') '}']);
-
-        if hasEdgeColor && hasFaceColor
-            [m2t, ecolor] = getColor(m2t, h, markerEdgeColor,'patch');
-            markerOptions = opts_add(markerOptions, 'draw', ecolor);
-        else
-            markerOptions = opts_add(markerOptions, 'draw', 'mapped color');
-        end
-        if hasFaceColor
-            markerOptions = opts_add(markerOptions, 'fill', 'mapped color');
-        end
-        drawOptions = opts_add(drawOptions, 'scatter');
-        drawOptions = opts_add(drawOptions, 'only marks');
-        drawOptions = opts_add(drawOptions, 'scatter src', 'explicit');
-        drawOptions = opts_add(drawOptions, 'scatter/use mapped color', ...
-                              ['{' opts_print(m2t, markerOptions, ',') '}']);
-        % Add color map.
-        m2t.axesContainers{end}.options = ...
-            opts_append(m2t.axesContainers{end}.options, ...
-            matlab2pgfplotsColormap(m2t, m2t.currentHandles.colormap), []);
+        [m2t, drawOptions] = getScatterOptsColormap(m2t, h, drawOptions, ...
+                           markOptions, tikzMarker, hasEdgeColor, hasFaceColor);
     end
     % - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     % Plot the thing.
@@ -3185,6 +3184,94 @@ function [m2t, str] = drawScatterPlot(m2t, h)
 
     str = sprintf('%s\\%s[%s] plot table[%s]{%s};\n', str, env, ...
         drawOpts, opts_print(m2t, tabOpts, ','), table);
+end
+% ==============================================================================
+function [m2t, drawOptions] = getScatterOptsOneColor(m2t, h, drawOptions, ...
+                        markOptions, tikzMarker, cData, sData, constMarkerkSize)
+% gets options specific to scatter plots with a single color
+    % No special treatment for the colors or markers are needed.
+    % All markers have the same color.
+    [m2t, xcolor, hasFaceColor] = getColorOfMarkers(m2t, h, 'MarkerFaceColor', cData);
+    [m2t, ecolor, hasEdgeColor] = getColorOfMarkers(m2t, h, 'MarkerEdgeColor', cData);
+    
+    if constMarkerkSize
+        drawOptions = opts_add(drawOptions, 'only marks');
+        drawOptions = opts_add(drawOptions, 'mark', tikzMarker);
+        drawOptions = opts_add(drawOptions, 'mark options', ...
+            ['{' opts_print(m2t, markOptions, ',') '}']);
+        drawOptions = opts_add(drawOptions, 'mark size', ...
+            sprintf('%.4fpt', sData)); % FIXME: investigate whether to use `m2t.ff`
+        if hasFaceColor && hasEdgeColor
+            drawOptions = opts_add(drawOptions, 'draw', ecolor);
+            drawOptions = opts_add(drawOptions, 'fill', xcolor);
+        else
+            drawOptions = opts_add(drawOptions, 'color', xcolor);
+        end
+    else % if changing marker size but same color on all marks
+        markerOptions = opts_new();
+        markerOptions = opts_add(markerOptions, 'mark', tikzMarker);
+        markerOptions = opts_add(markerOptions, 'mark options', ...
+            ['{' opts_print(m2t, markOptions, ',') '}']);
+        if hasEdgeColor
+            markerOptions = opts_add(markerOptions, 'draw', ecolor);
+        else
+            markerOptions = opts_add(markerOptions, 'draw', xcolor);
+        end
+        if hasFaceColor
+            markerOptions = opts_add(markerOptions, 'fill', xcolor);
+        end
+        % for changing marker size, the 'scatter' option has to be added
+        
+        drawOptions = opts_add(drawOptions, 'scatter');
+        drawOptions = opts_add(drawOptions, 'only marks');
+        drawOptions = opts_add(drawOptions, 'color', xcolor);
+        drawOptions = opts_add(drawOptions, 'mark', tikzMarker);
+        drawOptions = opts_add(drawOptions, 'mark options', ...
+            ['{' opts_print(m2t, markOptions, ',') '}']);
+        
+        if ~hasFaceColor
+            drawOptions = opts_add(drawOptions, ...
+                'scatter/use mapped color', xcolor);
+        else
+            drawOptions = opts_add(drawOptions, ...
+                'scatter/use mapped color', ...
+                ['{' opts_print(m2t, markerOptions,',') '}']);
+        end
+    end
+end
+function drawOptions = getScatterOptsRGB(m2t, drawOptions)
+% scatter plots with each marker a different RGB color (not yet supported!)
+    drawOptions = opts_add(drawOptions, 'only marks');
+    userWarning(m2t, 'Pgfplots cannot handle RGB scatter plots yet.');
+    % TODO Get this in order as soon as Pgfplots can do "scatter rgb".
+    % See e.g. http://tex.stackexchange.com/questions/197270 and #433
+end
+function [m2t, drawOptions] = getScatterOptsColormap(m2t, h, drawOptions, ...
+                            markOptions, tikzMarker, hasEdgeColor, hasFaceColor)
+% scatter plot where the colors are set using a color map
+    markerOptions = opts_new();
+    markerOptions = opts_add(markerOptions, 'mark', tikzMarker);
+    markerOptions = opts_add(markerOptions, 'mark options', ...
+        ['{' opts_print(m2t, markOptions, ',') '}']);
+    
+    if hasEdgeColor && hasFaceColor
+        [m2t, ecolor] = getColor(m2t, h, markerEdgeColor,'patch');
+        markerOptions = opts_add(markerOptions, 'draw', ecolor);
+    else
+        markerOptions = opts_add(markerOptions, 'draw', 'mapped color');
+    end
+    if hasFaceColor
+        markerOptions = opts_add(markerOptions, 'fill', 'mapped color');
+    end
+    drawOptions = opts_add(drawOptions, 'scatter');
+    drawOptions = opts_add(drawOptions, 'only marks');
+    drawOptions = opts_add(drawOptions, 'scatter src', 'explicit');
+    drawOptions = opts_add(drawOptions, 'scatter/use mapped color', ...
+        ['{' opts_print(m2t, markerOptions, ',') '}']);
+    % Add color map.
+    m2t.axesContainers{end}.options = opts_append(...
+        m2t.axesContainers{end}.options, ...
+        matlab2pgfplotsColormap(m2t, m2t.currentHandles.colormap), []);
 end
 % ==============================================================================
 function [env, data, sColumn] = organizeScatterData(m2t, xData, yData, zData, sData)
@@ -4325,7 +4412,7 @@ function [m2t, key, lOpts] = getLegendOpts(m2t, handle)
 
     % If the plot has 'legend boxoff', we have the 'not visible'
     % property, so turn off line and background fill.
-    if (~isVisible(handle))
+    if ~isVisible(handle) || strcmpi(get(handle,'box'),'off')
         lStyle = opts_add(lStyle, 'fill', 'none');
         lStyle = opts_add(lStyle, 'draw', 'none');
     else
@@ -4478,11 +4565,11 @@ function [lStyle] = legendEntryAlignment(m2t, handle, lStyle)
             switch lower(textpos)
                 case 'left'
                     % pictogram right of flush right text
-                    textalign = 'left';
+                    textalign = 'right';
                     pictalign = 'right';
                 case 'right'
                     % pictogram left of flush left text (default)
-                    textalign = 'right';
+                    textalign = 'left';
                     pictalign = 'left';
                 otherwise
                     userWarning(m2t, ...
@@ -4928,14 +5015,6 @@ function position = getAxesPosition(m2t, handle, widthString, heightString, axes
     position.w.unit  = figDim.x.unit;
     position.h.value = relPos(4) * figDim.y.value;
     position.h.unit  = figDim.y.unit;
-    
-    if strcmpi(get(handle, 'DataAspectRatioMode'), 'manual') ||...
-       strcmpi(get(handle, 'PlotBoxAspectRatioMode'), 'manual')
-        % we need to set the plot box aspect ratio
-        position.aspectRatio = getPlotBoxAspectRatio(handle);
-    else
-        position.aspectRatio = [];
-    end
 end
 % ==============================================================================
 function [position] = getRelativeAxesPosition(m2t, axesHandles, axesBoundingBox)
@@ -4979,7 +5058,22 @@ function [position] = getRelativeAxesPosition(m2t, axesHandles, axesBoundingBox)
             % project vertices of 3d plot box (this results in 2d coordinates in
             % an absolute coordinate system that is scaled proportionally by
             % Matlab to fit the axes position box)
-            projection = view(axesHandle);
+            switch getEnvironment()
+                case 'MATLAB'
+                    projection = view(axesHandle);
+
+                case 'Octave'
+                    % Unfortunately, Octave does not have the full `view` 
+                    % interface implemented, but the projection matrices are
+                    % available: http://octave.1599824.n4.nabble.com/Implementing-view-td3032041.html
+                    
+                    projection = get(axesHandle, 'x_viewtransform');
+
+                otherwise
+                    errorUnknownEnvironment();
+            end
+            
+                
             vertices = projection * [0, 1, 0, 0, 1, 1, 0, 1;
                                      0, 0, 1, 0, 1, 0, 1, 1;
                                      0, 0, 0, 1, 0, 1, 1, 1; 
@@ -5106,7 +5200,7 @@ function out = extractValueUnit(str)
 
     % Regular expression to match '4.12cm', '\figurewidth', ...
     fp_regex = '[-+]?\d*\.?\d*(?:e[-+]?\d+)?';
-    pattern = strcat('(', fp_regex, ')?', '(\\?[a-z]+)');
+    pattern = strcat('(', fp_regex, ')?', '(\\?[a-zA-Z]+)');
 
     [dummy,dummy,dummy,dummy,t,dummy] = regexp(str, pattern, 'match'); %#ok
 
@@ -5203,7 +5297,7 @@ function [m2t, axesBoundingBox] = getRelevantAxes(m2t, axesHandles)
     N   = numel(axesHandles);
     idx = false(N,1);
     for ii = 1:N
-       idx(ii) = isAxisVisible(axesHandles(ii));
+       idx(ii) = isVisibleContainer(axesHandles(ii));
     end
     % Store the relevant axes in m2t to simplify querying e.g. positions
     % of subplots
@@ -5918,6 +6012,16 @@ function opts = opts_append_userdefined(opts, userDefined)
         end
     end
 end
+function opts = opts_copy(opts_from, name_from, opts, name_to)
+% copies an option (if it exists) from one option array to another one
+    if ~exist('name_to', 'var') || isempty(name_to)
+        name_to = name_from;
+    end
+    if opts_has(opts_from, name_from)
+        value = opts_get(opts_from, name_from);
+        opts = opts_append(opts, name_to, value);
+    end
+end
 function opts = opts_remove(opts, varargin)
 % remove some key-value pairs from an options array
     keysToDelete = varargin;
@@ -5993,6 +6097,12 @@ function bool = isVersionBelow(versionA, versionB)
     bool       = ~isempty(difference) && deltaAB(difference) < 0;
 end
 % ==============================================================================
+function str = formatAspectRatio(m2t, values)
+% format the aspect ratio. Behind the scenes, formatDim is used
+    strs = arrayfun(@formatDim, values, 'UniformOutput', false);
+    str = join(m2t, strs, ' ');
+end
+% ==============================================================================
 function str = formatDim(value, unit)
 % format the value for use as a TeX dimension
     if ~exist('unit','var') || isempty(unit)
@@ -6000,21 +6110,17 @@ function str = formatDim(value, unit)
     end
     tolerance = 1e-7;
     value  = round(value/tolerance)*tolerance;
-    str = [];
-    for i = 1:length(value)
-        if value(i) == 1 && ~isempty(unit) && unit(1) == '\'
-            nextStr = unit; % just use the unit
-        else
-            nextStr = sprintf('%.6f', value(i));
-            nextStr = regexprep(nextStr, '(\d*\.\d*?)0+$', '$1'); % remove trailing zeros
-            nextStr = regexprep(nextStr, '\.$', ''); % remove trailing period
-            nextStr = [nextStr unit];
-        end
-        if isempty(str)
-            str = nextStr;
-        else
-            str = [str, ' ', nextStr];
-        end
+    if value == 1 && ~isempty(unit) && unit(1) == '\'
+        str = unit; % just use the unit
+    else
+        % LaTeX has support for single precision (about 6.5 decimal places),
+        % but such accuracy is overkill for positioning. We clip to three
+        % decimals to overcome numerical rounding issues that tend to be very
+        % platform and version dependent. See also #604.
+        str = sprintf('%.3f', value);
+        str = regexprep(str, '(\d*\.\d*?)0+$', '$1'); % remove trailing zeros
+        str = regexprep(str, '\.$', ''); % remove trailing period
+        str = [str unit];
     end
 end
 % ==============================================================================
