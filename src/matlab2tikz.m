@@ -5119,9 +5119,10 @@ function [position] = getRelativeAxesPosition(m2t, axesHandles, axesBoundingBox)
         % bounding box
         position(:,1) = position(:,1) - axesBoundingBox(1);
         position(:,2) = position(:,2) - axesBoundingBox(2);
-        % Recale
-        position(:,[1 3]) = position(:,[1 3]) / max(axesBoundingBox([3 4]));
-        position(:,[2 4]) = position(:,[2 4]) / max(axesBoundingBox([3 4]));
+        % Rescale such that [1, 1] is the top right corner of the bounding
+        % box
+        position(:,[1 3]) = position(:,[1 3]) / axesBoundingBox(3);
+        position(:,[2 4]) = position(:,[2 4]) / axesBoundingBox(4);
     end
 end
 % ==============================================================================
