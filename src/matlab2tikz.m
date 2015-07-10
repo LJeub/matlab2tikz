@@ -973,7 +973,7 @@ function m2t = retrievePositionOfAxes(m2t, handle)
 % structure
 
     pos = getAxesPosition(m2t, handle, m2t.cmdOpts.Results.width, ...
-                          m2t.cmdOpts.Results.height, m2t.axesBoundingBox);
+                          m2t.cmdOpts.Results.height);
     % set the width
     if (~m2t.cmdOpts.Results.noSize)
         % optionally prevents setting the width and height of the axis
@@ -4991,21 +4991,17 @@ function dimension = getFigureDimensions(m2t, widthString, heightString)
     end
 end
 % ==============================================================================
-function position = getAxesPosition(m2t, handle, widthString, heightString, axesBoundingBox)
+function position = getAxesPosition(m2t, handle, widthString, heightString)
 % Returns the physical position of the axes. This includes - in difference
 % to the Dimension - also an offset to shift the axes inside the figure
 % An optional bounding box can be used to omit empty borders.
 
-    % Deal with optional parameter
-    if nargin < 4
-        axesBoundingBox = [0 0 1 1];
-    end
 
     % First get the whole figures size
     figDim = getFigureDimensions(m2t, widthString, heightString);
 
     % Get the relative position of the axis
-    relPos = getRelativeAxesPosition(m2t, handle, axesBoundingBox);
+    relPos = getRelativeAxesPosition(m2t, handle);
 
     position.x.value = relPos(1) * figDim.x.value;
     position.x.unit  = figDim.x.unit;
@@ -5017,7 +5013,7 @@ function position = getAxesPosition(m2t, handle, widthString, heightString, axes
     position.h.unit  = figDim.y.unit;
 end
 % ==============================================================================
-function [position] = getRelativeAxesPosition(m2t, axesHandles, axesBoundingBox)
+function [position] = getRelativeAxesPosition(m2t, axesHandles)
 % Returns the relative position of axes within the figure.
 % Position is an (n,4) matrix with [minX, minY, width, height] for each
 % handle. All these values are relative to the figure size, which means
@@ -5027,26 +5023,13 @@ function [position] = getRelativeAxesPosition(m2t, axesHandles, axesBoundingBox)
 % this case, relative positions are rescaled so that the bounding box is
 % [0, 0, 1, 1]
 
-    % Get Figure Dimension
-    [figWidth, figHeight, figUnits] = getNaturalFigureDimension(m2t);
 
     % Initialize position
     position = zeros(numel(axesHandles), 4);
     % Iterate over all handles
     for i = 1:numel(axesHandles)
         axesHandle = axesHandles(i);
-        axesPos = get(axesHandle, 'Position');
-        axesUnits = get(axesHandle, 'Units');
-        if isequal(lower(axesUnits), 'normalized')
-            % Position is already relative
-            position(i,:) = axesPos;
-        else
-            % Convert figure size into axes units
-            figureSize = convertUnits([figWidth, figHeight], figUnits, axesUnits);
-            % Figure size into axes units to get the relative size
-            position(i,:) = axesPos ./ [figureSize, figureSize];
-
-        end
+        position(i,:) = getRelativePosition(m2t,axesHandle);
         
         if strcmpi(get(axesHandle, 'DataAspectRatioMode'), 'manual') ...
                 || strcmpi(get(axesHandle, 'PlotBoxAspectRatioMode'), 'manual')
@@ -5112,17 +5095,26 @@ function [position] = getRelativeAxesPosition(m2t, axesHandles, axesBoundingBox)
             end
         end
     end
-
-    %% Rescale if axesBoundingBox is given
-    if exist('axesBoundingBox','var')
+end
+% ==============================================================================
+function position = getRelativePosition(m2t,handle)
+    position = get(handle, 'Position');
+    units = get(handle, 'Units');
+    if ~strcmpi(units,'normalized')
+        % Get Figure Dimension
+        [figWidth, figHeight, figUnits] = getNaturalFigureDimension(m2t);
+        figureSize = convertUnits([figWidth, figHeight], figUnits, axesUnits);
+        position = position ./ [figureSize, figureSize];
+    end
+    % rescale position to bounding box if set
+    if isfield(m2t,'axesBoundingBox')
         % shift position so that [0, 0] is the lower left corner of the
         % bounding box
-        position(:,1) = position(:,1) - axesBoundingBox(1);
-        position(:,2) = position(:,2) - axesBoundingBox(2);
+        position(1:2) = position(1:2) - m2t.axesBoundingBox(1:2);
         % Rescale such that [1, 1] is the top right corner of the bounding
         % box
-        position(:,[1 3]) = position(:,[1 3]) / axesBoundingBox(3);
-        position(:,[2 4]) = position(:,[2 4]) / axesBoundingBox(4);
+        position([1 3]) = position([1 3]) / m2t.axesBoundingBox(3);
+        position([2 4]) = position([2 4]) / m2t.axesBoundingBox(4);
     end
 end
 % ==============================================================================
