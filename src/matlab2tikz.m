@@ -4103,7 +4103,7 @@ function axisOptions = getColorbarOptions(m2t, handle)
     axisOptions = opts_new();
     cbarStyleOptions = opts_new();
 
-    [cbarTemplate, cbarStyleOptions] = getColorbarPosOptions(handle, ...
+    [cbarTemplate, cbarStyleOptions] = getColorbarPosOptions(m2t ,handle, ...
                                                 cbarStyleOptions);
 
     % axis label and direction
@@ -4171,7 +4171,7 @@ function axisOptions = getColorbarOptions(m2t, handle)
     % do _not_ handle colorbar's children
 end
 % ==============================================================================
-function [cbarTemplate, cbarStyleOptions] = getColorbarPosOptions(handle, cbarStyleOptions)
+function [cbarTemplate, cbarStyleOptions] = getColorbarPosOptions(m2t, handle, cbarStyleOptions)
 % set position, ticks etc. of a colorbar
     loc = get(handle, 'Location');
     cbarTemplate = '';
@@ -4233,6 +4233,26 @@ function [cbarTemplate, cbarStyleOptions] = getColorbarPosOptions(handle, cbarSt
         case 'southoutside'
 
             cbarTemplate = 'horizontal';
+            
+        case 'manual'
+            cbarPosition = getRelativePosition(m2t, handle);
+            parentAxes = get(handle, 'axes');
+            axesPosition = getRelativeAxesPosition(m2t, parentAxes);
+            cbarStyleOptions = opts_add(cbarStyleOptions, 'at',...
+                ['{(',formatDim(cbarPosition(1)-axesPosition(1)),',',...
+                formatDim(cbarPosition(2)-axesPosition(2)),')}']);
+            cbarStyleOptions = opts_add(cbarStyleOptions, 'width',...
+                sprintf('%.2f*\\pgfkeysvalueof{/pgfplots/parent axis width}',...
+                cbarPosition(3)/axesPosition(3)));
+            cbarStyleOptions = opts_add(cbarStyleOptions, 'height',...
+                sprintf('%.2f*\\pgfkeysvalueof{/pgfplots/parent axis height}',...
+                cbarPosition(4)/axesPosition(4)));
+            
+            if cbarPosition(3)>cbarPosition(4)
+                % assume horizontal format if colorbar is wider than high
+                cbarTemplate = 'horizontal';
+            end
+                
         otherwise
             error('matlab2tikz:getColorOptions:unknownLocation',...
                 'getColorbarOptions: Unknown ''Location'' %s.', loc)
