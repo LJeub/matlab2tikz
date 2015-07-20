@@ -4977,8 +4977,9 @@ function dimension = getFigureDimensions(m2t, widthString, heightString)
 
     [width, height, unit] = getNaturalFigureDimension(m2t);
 
-    % get the natural width-height ration of the plot
-    axesWidthHeightRatio = width / height;
+    % get the natural width-height ration of the plot (scale to bounding
+    % box)
+    axesWidthHeightRatio = (width * m2t.axesBoundingBox(3)) / (height * m2t.axesBoundingBox(4));
     % check matlab2tikz arguments
     if ~isempty(widthString)
         width = extractValueUnit(widthString);
@@ -5005,9 +5006,9 @@ function dimension = getFigureDimensions(m2t, widthString, heightString)
         dimension.x.value = height.value * axesWidthHeightRatio;
     else % neither width nor height given
         dimension.x.unit  = unit;
-        dimension.x.value = width;
+        dimension.x.value = width * m2t.axesBoundingBox(3);
         dimension.y.unit  = unit;
-        dimension.y.value = height;
+        dimension.y.value = height * m2t.axesBoundingBox(4);
     end
 end
 % ==============================================================================
