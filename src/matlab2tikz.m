@@ -4235,7 +4235,7 @@ function [cbarTemplate, cbarStyleOptions] = getColorbarPosOptions(m2t, handle, c
             cbarTemplate = 'horizontal';
             
         case 'manual'
-            cbarPosition = getRelativePosition(m2t, handle);
+            cbarPosition = getRelativePosition(m2t, get(handle,'position'));
             parentAxes = get(handle, 'axes');
             axesPosition = getRelativeAxesPosition(m2t, parentAxes);
             cbarStyleOptions = opts_add(cbarStyleOptions, 'at',...
@@ -5049,7 +5049,7 @@ function [position] = getRelativeAxesPosition(m2t, axesHandles)
     % Iterate over all handles
     for i = 1:numel(axesHandles)
         axesHandle = axesHandles(i);
-        position(i,:) = getRelativePosition(m2t,axesHandle);
+        position(i,:) = getNormalizedPosition(m2t,axesHandle);
         
         if strcmpi(get(axesHandle, 'DataAspectRatioMode'), 'manual') ...
                 || strcmpi(get(axesHandle, 'PlotBoxAspectRatioMode'), 'manual')
@@ -5097,6 +5097,7 @@ function [position] = getRelativeAxesPosition(m2t, axesHandles)
             dimensions = max(abs(diagonals), [], 2);
             
             % find limiting dimension and adjust position
+            [figWidth, figHeight, figUnits] = getNaturalFigureDimension(m2t);
             aspectRatio = dimensions(2) * figWidth / (dimensions(1) * figHeight);
             axesAspectRatio = position(i,4) / position(i,3);
             if aspectRatio > axesAspectRatio
@@ -5114,18 +5115,22 @@ function [position] = getRelativeAxesPosition(m2t, axesHandles)
                 position(i,4) = newHeight;
             end
         end
+        position(i,:) = getRelativePosition(m2t,position(i,:));
     end
 end
 % ==============================================================================
-function position = getRelativePosition(m2t,handle)
-    position = get(handle, 'Position');
-    units = get(handle, 'Units');
+function position = getNormalizedPosition(m2t,handle)
+    position = get(handle, 'position');
+    units = get(handle, 'units');
     if ~strcmpi(units,'normalized')
         % Get Figure Dimension
         [figWidth, figHeight, figUnits] = getNaturalFigureDimension(m2t);
-        figureSize = convertUnits([figWidth, figHeight], figUnits, axesUnits);
+        figureSize = convertUnits([figWidth, figHeight], figUnits, units);
         position = position ./ [figureSize, figureSize];
     end
+end
+% ==============================================================================
+function position = getRelativePosition(m2t,position)
     % rescale position to bounding box if set
     if isfield(m2t,'axesBoundingBox')
         % shift position so that [0, 0] is the lower left corner of the
