@@ -2890,6 +2890,7 @@ function [m2t,posString] = getPositionOfText(m2t, h)
     end
 
     % Format according to units
+    roundFlag = true;
     switch units
         case 'normalized'
             type    = 'rel axis cs:';
@@ -2897,6 +2898,7 @@ function [m2t,posString] = getPositionOfText(m2t, h)
         case 'data'
             type    = 'axis cs:';
             fmtUnit = '';
+            roundFlag = false;
         % Let Matlab do the conversion of any unit into cm
         otherwise
             type    = '';
@@ -2914,7 +2916,7 @@ function [m2t,posString] = getPositionOfText(m2t, h)
     end
     posString = cell(1,npos);
     for ii = 1:npos
-        posString{ii} = formatDim(pos(ii), fmtUnit);
+        posString{ii} = formatDim(pos(ii), fmtUnit, roundFlag);
     end
 
     posString = sprintf('(%s%s)',type,join(m2t,posString,','));
@@ -6122,13 +6124,22 @@ function str = formatAspectRatio(m2t, values)
     str = join(m2t, strs, ' ');
 end
 % ==============================================================================
-function str = formatDim(value, unit)
+function str = formatDim(value, unit, roundFlag)
 % format the value for use as a TeX dimension
+    if ~exist('roundFlag','var') || isempty(roundFlag)
+        % round dimensions unless specified otherwise (e.g. for axis cs)
+        roundFlag = true;
+    end
+
     if ~exist('unit','var') || isempty(unit)
         unit = '';
     end
-    tolerance = 1e-7;
-    value  = round(value/tolerance)*tolerance;
+    
+    if roundFlag
+        tolerance = 1e-7;
+        value  = round(value/tolerance)*tolerance;
+    end
+    
     if value == 1 && ~isempty(unit) && unit(1) == '\'
         str = unit; % just use the unit
     else
@@ -6136,7 +6147,11 @@ function str = formatDim(value, unit)
         % but such accuracy is overkill for positioning. We clip to three
         % decimals to overcome numerical rounding issues that tend to be very
         % platform and version dependent. See also #604.
-        str = sprintf('%.3f', value);
+        if roundFlag
+            str = sprintf('%.3f', value);
+        else
+            str = sprintf('%f',value);
+        end
         str = regexprep(str, '(\d*\.\d*?)0+$', '$1'); % remove trailing zeros
         str = regexprep(str, '\.$', ''); % remove trailing period
         str = [str unit];
