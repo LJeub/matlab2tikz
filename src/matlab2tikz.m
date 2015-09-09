@@ -831,7 +831,8 @@ function m2t = drawAxes(m2t, handle)
     m2t = retrievePositionOfAxes(m2t, handle);
 
     m2t = addAspectRatioOptionsOfAxes(m2t, handle);
-
+    m2t = addClippingOptionsOfAxes(m2t, handle);
+    
     % Axis direction
     for axis = 'xyz'
         m2t.([axis 'AxisReversed']) = ...
@@ -1012,6 +1013,14 @@ function m2t = addAspectRatioOptionsOfAxes(m2t, handle)
             m2t.axesContainers{end}.options, 'plot box ratio', ...
             formatAspectRatio(m2t, aspectRatio));
         end
+    end
+end
+% ==============================================================================
+function m2t = addClippingOptionsOfAxes(m2t, handle)
+% Set 'clipping' based on the axes options in Matlab
+    if strcmpi(get(handle, 'Clipping'), 'off')
+        m2t.axesContainers{end}.options = opts_add(...
+            m2t.axesContainers{end}.options, 'clip', 'false');
     end
 end
 % ==============================================================================
