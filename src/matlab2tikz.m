@@ -225,6 +225,7 @@ ipp = ipp.addParamValue(ipp, 'externalData', false, @islogical);
 ipp = ipp.addParamValue(ipp, 'dataPath', '', @ischar);
 ipp = ipp.addParamValue(ipp, 'relativeDataPath', '', @ischar);
 ipp = ipp.addParamValue(ipp, 'noSize', false, @islogical);
+ipp = ipp.addParamValue(ipp, 'parseUserData', false, @islogical);
 
 % Maximum chunk length.
 % TeX parses files line by line with a buffer of size buf_size. If the
@@ -494,6 +495,10 @@ function m2t = saveToFile(m2t, fid, fileWasOpen)
     m2t.content.name = 'tikzpicture';
 
     % Add custom TikZ options if any given.
+    if m2t.cmdOpts.Results.parseUserData
+        m2t.content.options = opts_append_userdefined(m2t.content.options, ...
+                                    get(m2t.currentHandles.gcf,'UserData'));
+    end
     m2t.content.options = opts_append_userdefined(m2t.content.options, ...
                                    m2t.cmdOpts.Results.extraTikzpictureOptions);
 
@@ -897,7 +902,12 @@ function m2t = drawAxes(m2t, handle)
     m2t = drawBoxAndLineLocationsOfAxes(m2t, handle);
     m2t = drawGridOfAxes(m2t, handle);
     m2t = drawLegendOptionsOfAxes(m2t, handle);
-
+    
+    if m2t.cmdOpts.Results.parseUserData
+        m2t.axesContainers{end}.options = opts_append_userdefined(...
+            m2t.axesContainers{end}.options, get(handle, 'UserData'));
+    end
+    
     m2t.axesContainers{end}.options = opts_append_userdefined(...
         m2t.axesContainers{end}.options, m2t.cmdOpts.Results.extraAxisOptions);
 end
