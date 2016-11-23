@@ -2151,14 +2151,22 @@ function [m2t, str] = imageAsPNG(m2t, handle, xData, yData, cData)
     % -----------------------------------------------------------------------
     % dimensions of a pixel in axes units
     if n == 1
-        xLim = get(m2t.currentHandles.gca, 'XLim');
-        xw = xLim(2) - xLim(1);
+        if length(xData)==1
+            xLim = get(m2t.currentHandles.gca, 'XLim');
+            xw = xLim(2) - xLim(1);
+        else
+            xw=0;
+        end
     else
         xw = (xData(end)-xData(1)) / (n-1);
     end
     if m == 1
-        yLim = get(m2t.currentHandles.gca, 'YLim');
-        yw = yLim(2) - yLim(1);
+        if length(yData)==1
+            yLim = get(m2t.currentHandles.gca, 'YLim');
+            yw = yLim(2) - yLim(1);
+        else
+            yw=0;
+        end
     else
         yw = (yData(end)-yData(1)) / (m-1);
     end
@@ -2196,25 +2204,38 @@ function [m2t, str] = imageAsTikZ(m2t, handle, xData, yData, cData)
     % This is MATLAB(R) behavior.
     switch length(xData)
         case 2 % only the limits given; common for generic image plots
-            hX = 1;
-        case size(cData,1) % specific x-data is given
+            if size(cData,2)>1
+                hX = (xData(end)-xData(1)) / (size(cData,2)-1);
+                X=(xData(1)):hX:(xData(end));
+            else
+                hX=(xData(end)-XData(1));
+                X=mean(xData);
+            end
+        case size(cData,2) % specific x-data is given
             hX = (xData(end)-xData(1)) / (length(xData)-1);
+            X=xData;
         otherwise
             error('drawImage:arrayLengthMismatch', ...
                 'Array lengths not matching (%d = size(cdata,1) ~= length(xData) = %d).', size(cData,1), length(xData));
     end
-    X = xData(1):hX:xData(end);
+
 
     switch length(yData)
         case 2 % only the limits given; common for generic image plots
-            hY = 1;
-        case size(cData,2) % specific y-data is given
-            hY = (yData(end)-yData(1)) / (length(yData)-1);
+            if size(cData,1)>1
+                hY = (yData(end)-yData(1)) / (size(cData,1)-1);
+                Y=(yData(1)):hY:(yData(end));
+            else
+                hY=yData(end)-yData(1);
+                Y=mean(yData);
+            end
+        case size(cData,1) % specific y-data is given
+            hY=(yData(end)-yData(1)) / (length(yData)-1);
+            Y=yData;
         otherwise
             error('drawImage:arrayLengthMismatch', ...
                 'Array lengths not matching (%d = size(cData,2) ~= length(yData) = %d).', size(cData,2), length(yData));
     end
-    Y = yData(1):hY:yData(end);
     [m2t, xcolor] = getColor(m2t, handle, cData, 'image');
 
     % The following section takes pretty long to execute, although in
@@ -2228,6 +2249,7 @@ function [m2t, str] = imageAsTikZ(m2t, handle, xData, yData, cData)
     str = '';
     m = length(X);
     n = length(Y);
+
     for i = 1:m
         for j = 1:n
             str = [str, ...
