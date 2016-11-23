@@ -2846,6 +2846,10 @@ function [m2t, str] = drawText(m2t, handle)
 
     EdgeColor = get(handle, 'EdgeColor');
     [m2t, style] = setColor(m2t, handle, style, 'draw', EdgeColor);
+    
+    if m2t.cmdOpts.Results.parseUserData
+        style = opts_append_userdefined(style, get(handle,'UserData'));
+    end
 
     % - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     % plot the thing
